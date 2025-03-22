@@ -1,22 +1,22 @@
-FROM golang:latest AS builder
+FROM golang:1.24.0 AS builder
 
 WORKDIR /app
 
+COPY go.mod go.sum ./
+
+RUN go mod download
+
 COPY . .
 
-RUN go mod tidy && go build -o todo-app .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o todo-app .
 
-FROM ubuntu:latest
+FROM alpine:latest
 
 WORKDIR /app
 
 COPY --from=builder /app/todo-app .
 
 COPY web ./web
-
-ENV TODO_PORT=7540
-
-ENV TODO_DBFILE=/app/data/scheduler.db
 
 EXPOSE 7540
 

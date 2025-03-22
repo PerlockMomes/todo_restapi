@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strconv"
 
-	_ "github.com/mattn/go-sqlite3"
-	"todo_restapi/internal/dto"
-	"todo_restapi/internal/myfunctions"
+	_ "modernc.org/sqlite"
+	"todo_restapi/internal/constants"
+	"todo_restapi/internal/models"
+	"todo_restapi/internal/services"
 )
 
 type Storage struct {
@@ -19,9 +20,13 @@ func NewStorage(db *sql.DB) *Storage {
 	return &Storage{db: db}
 }
 
+func (s *Storage) CloseStorage() error {
+	return s.db.Close()
+}
+
 func OpenStorage(storagePath string) (*Storage, error) {
 
-	db, err := sql.Open("sqlite3", storagePath)
+	db, err := sql.Open("sqlite", storagePath)
 	if err != nil {
 		return nil, fmt.Errorf("database open error: %w", err)
 	}
@@ -73,9 +78,9 @@ func (s *Storage) AddTask(task models.Task) (int64, error) {
 
 func (s *Storage) GetTasks() ([]models.Task, error) {
 
-	output := make([]models.Task, 0, 10)
+	output := make([]models.Task, 0, constants.TasksLimit)
 
-	rows, err := s.db.Query("SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT 10")
+	rows, err := s.db.Query("SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT ?", constants.TasksLimit)
 	if err != nil {
 		return output, fmt.Errorf("row query error: %w", err)
 	}
@@ -102,7 +107,7 @@ func (s *Storage) GetTasks() ([]models.Task, error) {
 	return output, nil
 }
 
-func (s *Storage) GetOneTask(id string) (models.Task, error) {
+func (s *Storage) GetTask(id string) (models.Task, error) {
 
 	var getTask models.Task
 
@@ -171,16 +176,16 @@ func (s *Storage) SearchTasks(searchQuery string) ([]models.Task, error) {
 
 	var query string
 	var arguments []interface{}
-	output := make([]models.Task, 0, 10)
+	output := make([]models.Task, 0, constants.TasksLimit)
 
-	date, err := myfunctions.IsDate(searchQuery)
+	date, err := services.IsDate(searchQuery)
 	if err == nil {
-		query = "SELECT * FROM scheduler WHERE date=? LIMIT 10"
-		arguments = append(arguments, date)
+		query = "SELECT * FROM scheduler WHERE date=? LIMIT ?"
+		arguments = append(arguments, date, constants.TasksLimit)
 	} else {
-		query = "SELECT * FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT 10"
+		query = "SELECT * FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT ?"
 		searchPattern := "%" + searchQuery + "%"
-		arguments = append(arguments, searchPattern, searchPattern)
+		arguments = append(arguments, searchPattern, searchPattern, constants.TasksLimit)
 	}
 
 	rows, err := s.db.Query(query, arguments...)

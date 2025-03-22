@@ -4,41 +4,31 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/joho/godotenv"
-	"todo_restapi/internal/handlers"
+	"todo_restapi/internal/config"
+	"todo_restapi/internal/http-server/handlers"
+	"todo_restapi/internal/http-server/middlewares"
 	"todo_restapi/internal/storage"
-	"todo_restapi/middlewares"
 )
-
-func init() {
-	if err := godotenv.Load(); err != nil {
-		fmt.Printf("init: no .env file found: %v\n", err)
-	}
-}
 
 func main() {
 
-	port, exists := os.LookupEnv("TODO_PORT")
-	if !exists {
-		fmt.Println("no port in .env, will use default port (:7540)")
-		port = ":7540"
-	}
+	cfg := config.LoadConfig()
 
-	storagePath, exists := os.LookupEnv("TODO_DBFILE")
-	if !exists {
-		fmt.Println("no path in .env, will use default path (./scheduler.db)")
-		storagePath = "./scheduler.db"
-	}
-
-	database, err := storage.OpenStorage(storagePath)
+	database, err := storage.OpenStorage(cfg.StoragePath)
 	if err != nil {
 		log.Fatalf("OpenStorage: %v", err)
 	}
 
-	taskHandler := handlers.NewTaskHandler(database)
+	defer func() {
+		if err := database.CloseStorage(); err != nil {
+			log.Printf("failed to close database: %v", err)
+		}
+	}()
+
+	taskHandler := handlers.NewTaskHandler(database, cfg)
+	autService := middlewares.NewAuthService(cfg)
 
 	router := chi.NewRouter()
 
@@ -47,17 +37,22 @@ func main() {
 	})
 	router.Handle("/*", http.StripPrefix("/", http.FileServer(http.Dir("web"))))
 
-	router.Get("/api/nextdate", handlers.NextDateHandler)
-	router.Post("/api/signin", taskHandler.Authentication)
+	router.Get("/api/nextdate", taskHandler.NextDate)
 
-	router.With(middlewares.Auth).Route("/api", func(router chi.Router) {
-		router.HandleFunc("/task", taskHandler.CRUDTask)
+	router.Post("/api/signin", taskHandler.Authentication)
+	router.With(middlewares.Auth(autService)).Route("/api", func(router chi.Router) {
+
+		router.Get("/task", taskHandler.GetTask)
+		router.Post("/task", taskHandler.AddTask)
+		router.Put("/task", taskHandler.EditTask)
+		router.Delete("/task", taskHandler.DeleteTask)
+
 		router.Get("/tasks", taskHandler.GetTasks)
 		router.HandleFunc("/task/done", taskHandler.TaskIsDone)
 	})
 
-	fmt.Printf("Server is running on port%s...\n", port)
-	if err := http.ListenAndServe(port, router); err != nil {
+	fmt.Printf("Server is running on port%s...\n", cfg.Port)
+	if err := http.ListenAndServe(cfg.Port, router); err != nil {
 		log.Fatalf("server run error: %v\n", err)
 	}
 }
